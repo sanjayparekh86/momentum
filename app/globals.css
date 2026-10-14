@@ -1,0 +1,27 @@
+:root { --bg:#f6f5f1; --ink:#1b1f23; --mute:#6b7178; --line:#dcd9d0; --up:#0f7b4f; --down:#b3321f; --card:#fffefb; }
+@media (prefers-color-scheme: dark) { :root { --bg:#14181c; --ink:#e8e6e0; --mute:#8b939b; --line:#2b3238; --up:#3ecf8e; --down:#ff7a66; --card:#1a1f24; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui, sans-serif; }
+main { max-width:1100px; margin:0 auto; padding:32px 20px; }
+header { display:flex; flex-wrap:wrap; gap:16px; justify-content:space-between; align-items:end; }
+h1 { font:600 28px/1.2 Georgia, serif; margin:0; }
+.controls { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+input, select, button { font:inherit; padding:6px 10px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--ink); }
+input { width:64px; margin:0 4px; }
+button { cursor:pointer; background:var(--ink); color:var(--bg); }
+button:disabled { opacity:.5; cursor:wait; }
+:focus-visible { outline:2px solid var(--up); outline-offset:2px; }
+.meta { color:var(--mute); }
+.err { color:var(--down); }
+.wrap { overflow-x:auto; border:1px solid var(--line); border-radius:8px; background:var(--card); }
+table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+th, td { padding:10px 12px; text-align:left; border-bottom:1px solid var(--line); vertical-align:top; }
+th { font-weight:500; color:var(--mute); font-size:13px; }
+tr:last-child td { border-bottom:0; }
+.up { color:var(--up); font-weight:600; } .down { color:var(--down); font-weight:600; }
+.why { color:var(--mute); font-size:13px; min-width:260px; }
+.v { padding:2px 10px; border-radius:99px; font-size:13px; font-weight:600; border:1px solid currentColor; }
+.v.BUY { color:var(--up); } .v.WATCH { color:#b7791f; } .v.AVOID { color:var(--down); }
+footer { margin-top:24px; color:var(--mute); font-size:13px; }
+.pager { display:flex; gap:8px; align-items:center; justify-content:center; flex-wrap:wrap; margin-top:16px; color:var(--mute); font-size:14px; }
+.pager button:disabled { cursor:default; }
