@@ -10,6 +10,7 @@ const PAGE_SIZE = 100;
 export default function Home() {
   const [data, setData] = useState(null);
   const [threshold, setThreshold] = useState(5);
+  const [thresholdText, setThresholdText] = useState("5");
   const [direction, setDirection] = useState("both");
   const [range, setRange] = useState("1d");
   const [page, setPage] = useState(1);
@@ -98,8 +99,17 @@ export default function Home() {
         <h1>Movers over {threshold}% {RANGES[range].title}</h1>
         <div className="controls">
           <label>Move ≥
-            <input type="number" min="0" step="0.5" value={threshold}
-                   onChange={(e) => setThreshold(e.target.value === "" ? 5 : Number(e.target.value))} />%
+            <input type="text" inputMode="decimal" enterKeyHint="done" autoComplete="off" value={thresholdText}
+                   aria-label="Minimum move percentage"
+                   onFocus={(e) => { const input = e.target; input.select(); setTimeout(() => input.select(), 0); }}
+                   onChange={(e) => {
+                     const text = e.target.value.replace(",", ".");
+                     if (!/^\d*\.?\d*$/.test(text)) return;
+                     setThresholdText(text);
+                     if (text !== "" && text !== ".") setThreshold(Number(text));
+                   }}
+                   onBlur={() => setThresholdText(String(threshold))}
+                   onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} />%
           </label>
           <select value={range} onChange={(e) => setRange(e.target.value)} aria-label="Range">
             {Object.entries(RANGES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
@@ -146,15 +156,15 @@ export default function Home() {
             {sortHeader("verdict", "Verdict")}<th>Why</th></tr></thead>
           <tbody>{rows.map((m) => (
             <tr key={m.symbol}>
-              <td><button className="stock-link" onClick={() => setSelected(m)} aria-label={`View ${m.symbol} details`}>{m.symbol}</button></td>
-              <td>₹{m.price.toLocaleString("en-IN")}</td>
-              {!isToday && <td className={m.rangeChange >= 0 ? "up" : "down"}>{fmt(m.rangeChange)}</td>}
-              <td className={m.change >= 0 ? "up" : "down"}>{fmt(m.change)}</td>
-              <td>{m.rsi ?? "-"}</td>
-              <td>{m.volRatio ? `${m.volRatio}x` : "-"}</td>
-              <td>{m.score}</td>
-              <td><span className={`v ${m.verdict}`}>{m.verdict}</span></td>
-              <td className="why">{m.reasons.join(" · ")}</td>
+              <td data-label="Stock" className="stock-cell"><button className="stock-link" onClick={() => setSelected(m)} aria-label={`View ${m.symbol} details`}>{m.symbol}</button></td>
+              <td data-label="Price">₹{m.price.toLocaleString("en-IN")}</td>
+              {!isToday && <td data-label={RANGES[data.range].label} className={m.rangeChange >= 0 ? "up" : "down"}>{fmt(m.rangeChange)}</td>}
+              <td data-label={isToday ? "Change" : "Today"} className={m.change >= 0 ? "up" : "down"}>{fmt(m.change)}</td>
+              <td data-label="RSI">{m.rsi ?? "-"}</td>
+              <td data-label="Volume">{m.volRatio ? `${m.volRatio}x` : "-"}</td>
+              <td data-label="Score">{m.score}</td>
+              <td data-label="Verdict"><span className={`v ${m.verdict}`}>{m.verdict}</span></td>
+              <td data-label="Why" className="why">{m.reasons.join(" · ")}</td>
             </tr>))}
           </tbody>
         </table></div>
