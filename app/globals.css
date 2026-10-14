@@ -20,8 +20,9 @@ th { font-weight:500; color:var(--mute); font-size:13px; }
 tr:last-child td { border-bottom:0; }
 .up { color:var(--up); font-weight:600; } .down { color:var(--down); font-weight:600; }
 .why { color:var(--mute); font-size:13px; min-width:260px; }
-.v { padding:2px 10px; border-radius:99px; font-size:13px; font-weight:600; border:1px solid currentColor; }
-.v.BUY { color:var(--up); } .v.WATCH { color:#b7791f; } .v.AVOID { color:var(--down); }
+.v { padding:2px 10px; border-radius:99px; font-size:13px; font-weight:600; border:1px solid currentColor; white-space:nowrap; }
+.v.BULLISH { color:var(--up); } .v.NEUTRAL { color:#b7791f; } .v.BEARISH { color:var(--down); } .v.INSUFFICIENT { color:var(--mute); border-style:dashed; }
+tr.insufficient td { color:var(--mute); }
 footer { margin-top:24px; color:var(--mute); font-size:13px; }
 .pager { display:flex; gap:8px; align-items:center; justify-content:center; flex-wrap:wrap; margin-top:16px; color:var(--mute); font-size:14px; }
 .pager button:disabled { cursor:default; }

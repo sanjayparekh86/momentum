@@ -4,7 +4,9 @@ import { getUniverse, parseSymbols } from "../lib/symbols.js";
 import { getDaily, getNews } from "../lib/yahoo.js";
 import { scanStocks, withAllTime, getScanProgress, SCAN_TTL_MS } from "../lib/screener.js";
 import { getStockDetails } from "../lib/stock.js";
-import { selectMovers, sortsAscending } from "../lib/table.js";
+import { selectMovers, sortsAscending, matchesMove } from "../lib/table.js";
+import { analyze, adviceVerdict, signalFor } from "../lib/verdict.js";
+import { rangeChange } from "../lib/ranges.js";
 
 function chart(count = 40) {
   return Response.json({ chart: { result: [{
@@ -36,15 +38,17 @@ test("search and sorting are case insensitive, deterministic, and do not mutate 
   assert.deepEqual(symbols(selectMovers(rows, "", "symbol")), ["ABC", "TCS", "XYZ"]);
   assert.deepEqual(symbols(selectMovers(rows, "", "symbol", true)), ["XYZ", "TCS", "ABC"]);
   assert.deepEqual(symbols(selectMovers(rows, "", "score")), ["ABC", "TCS", "XYZ"]);
-  const verdicts = [
-    { symbol: "AVOID1", verdict: "AVOID", score: 1, rangeChange: 1 },
-    { symbol: "BUY4", verdict: "BUY", score: 4, rangeChange: 1 },
-    { symbol: "WATCH3", verdict: "WATCH", score: 3, rangeChange: 1 },
-    { symbol: "BUY5", verdict: "BUY", score: 5, rangeChange: 1 },
-    { symbol: "UNKNOWN", verdict: null, score: 9, rangeChange: 1 },
+  const signals = [
+    { symbol: "BEAR1", signal: "BEARISH", score: 1, rangeChange: 1 },
+    { symbol: "BULL4", signal: "BULLISH", score: 4, rangeChange: 1 },
+    { symbol: "NEUTRAL3", signal: "NEUTRAL", score: 3, rangeChange: 1 },
+    { symbol: "BULL5", signal: "BULLISH", score: 5, rangeChange: 1 },
+    { symbol: "NODATA", signal: "INSUFFICIENT", score: null, rangeChange: null, insufficient: true },
   ];
-  assert.deepEqual(symbols(selectMovers(verdicts, "", "verdict")), ["BUY5", "BUY4", "WATCH3", "AVOID1", "UNKNOWN"]);
-  assert.deepEqual(symbols(selectMovers(verdicts, "", "verdict", true)), ["AVOID1", "WATCH3", "BUY4", "BUY5", "UNKNOWN"]);
+  assert.deepEqual(symbols(selectMovers(signals, "", "signal")), ["BULL5", "BULL4", "NEUTRAL3", "BEAR1", "NODATA"]);
+  assert.deepEqual(symbols(selectMovers(signals, "", "signal", true)), ["BEAR1", "NEUTRAL3", "BULL4", "BULL5", "NODATA"]);
+  assert.equal(symbols(selectMovers(signals, "", "movement")).at(-1), "NODATA");
+  assert.equal(symbols(selectMovers(signals, "", "movement", true)).at(-1), "NODATA");
   const today = [{ symbol: "LOW", change: -2 }, { symbol: "HIGH", change: 4 }];
   assert.deepEqual(symbols(selectMovers(today, "", "change")), ["HIGH", "LOW"]);
   assert.equal(sortsAscending("symbol", false), true);
@@ -55,6 +59,32 @@ test("search and sorting are case insensitive, deterministic, and do not mutate 
   assert.deepEqual(symbols(selectMovers(rows, "consultancy", "movement")), ["TCS"]);
   assert.deepEqual(selectMovers(rows, "missing", "score"), []);
   assert.deepEqual(symbols(rows), ["XYZ", "TCS", "ABC"]);
+});
+
+test("public signals are non-advisory and insufficient data is listed explicitly", () => {
+  assert.deepEqual([4, 3, 2, 1, -3].map(signalFor), ["BULLISH", "NEUTRAL", "NEUTRAL", "BEARISH", "BEARISH"]);
+  assert.deepEqual([4, 2, 1].map(adviceVerdict), ["BUY", "WATCH", "AVOID"]);
+  const bars = (count) => Array.from({ length: count }, (_, i) => ({ t: 1700000000 + i * 86400, c: 100 + i, v: 1000 }));
+  const full = analyze(bars(40));
+  assert.equal(full.insufficient, false);
+  assert.ok(["BULLISH", "NEUTRAL", "BEARISH"].includes(full.signal));
+  assert.equal("verdict" in full, false);
+  const short = analyze(bars(30));
+  assert.equal(short.signal, "INSUFFICIENT");
+  assert.equal(short.insufficient, true);
+  assert.equal(short.price, 129);
+  assert.equal(short.score, null);
+  assert.match(short.reasons[0], /30 of 31/);
+  const single = analyze(bars(1));
+  assert.equal(single.change, null);
+  assert.equal(rangeChange(bars(1), "1d"), null);
+  assert.equal(rangeChange([], "all", 50), null);
+  const known = { insufficient: true, rangeChange: 6 }, unknown = { insufficient: true, rangeChange: null };
+  assert.equal(matchesMove(known, 5, "up"), true);
+  assert.equal(matchesMove(known, 7, "both"), false);
+  assert.equal(matchesMove(unknown, 0, "both"), true);
+  assert.equal(matchesMove(unknown, 0, "up"), false);
+  assert.equal(matchesMove(unknown, 1, "both"), false);
 });
 
 test("fresh full scans expose early batches without starting another scan", async (t) => {
@@ -154,7 +184,9 @@ test("Yahoo encodes symbols and reports unavailable and insufficient data", asyn
   globalThis.fetch = async () => new Response("", { status: 404 });
   await assert.rejects(getDaily("M&M"), /404/);
   globalThis.fetch = async () => chart(30);
-  await assert.rejects(getDaily("M&M"), /Insufficient price history/);
+  assert.equal((await getDaily("M&M")).length, 30);
+  globalThis.fetch = async () => chart(0);
+  await assert.rejects(getDaily("M&M"), /Daily price data is unavailable/);
 });
 
 test("full scans cover more than 100 symbols, limit concurrency, and share the five-minute cache", async (t) => {

@@ -7,7 +7,7 @@
     npm run dev                    # http://localhost:3000
 
 API:
-- GET /api/screener?threshold=5&direction=both&save=1   movers with verdicts
+- GET /api/screener?threshold=5&direction=both&save=1   movers with public trend signals
 - GET /api/screener?threshold=10&range=3mo              movers over a range: 1d (default), 5d, 1mo, 3mo, 1y, all
                                                         (history is only saved for range=1d)
 - GET /api/screener?symbols=WELCORP,TCS&threshold=0      analyze specific stocks
@@ -38,19 +38,25 @@ Fresh scans expose batches as they complete; the dashboard checks progress every
 Existing completed results remain usable during refreshes. All-time results still
 wait for historical enrichment before being shown.
 
-Set the minimum move to 0% to display all analyzable stocks. Results are paginated
-at 100 rows per page. Stocks without sufficient Yahoo history are listed separately
-with failure reasons; the API reports `scanned`, `available`, and `unavailable`.
-NSE list failures and Yahoo rate limits fail the request explicitly rather than
-falling back to a smaller universe. Custom `symbols` requests bypass the full-market
-scan cache. History is saved only for Today.
+Set the minimum move to 0% with the direction set to "Up and down" to display
+every listed stock the screener fetched. Results are paginated at 100 rows per
+page. Stocks without enough data for full analysis now stay in the main list with
+the public signal `INSUFFICIENT` and an explicit reason. The API reports
+`scanned`, `available`, `insufficient`, and `unavailable`. `available` counts
+stocks with enough history for the full technical model; `insufficient` counts
+stocks shown with limited information. NSE list failures and Yahoo rate limits
+fail the request explicitly rather than falling back to a smaller universe.
+Custom `symbols` requests bypass the full-market scan cache. History is saved
+only for Today.
 
 ## Search, sorting, and stock details
 
-Search matches stock symbols in the current screener results (set Move to 0% to
-search every analyzable stock). Sorting supports absolute movement, gains,
-declines, symbol, price, RSI, relative volume, technical score, and verdict
-(BUY, WATCH, AVOID; score breaks ties), with reverse order. Click a table header
+Search matches stock symbols in the current screener results (set Move to 0%
+with "Up and down" to search every listed stock). Sorting supports absolute
+movement, gains, declines, symbol, price, RSI, relative volume, technical score,
+today's change, and signal. Public signal labels are `BULLISH`, `NEUTRAL`,
+`BEARISH`, and `INSUFFICIENT`; score breaks ties for the first three, and
+insufficient-data rows stay last when sorting by movement. Click a table header
 to sort it; click the active header again to reverse it (▲ ascending, ▼ descending,
 ↕ inactive). Both run locally without API requests and reset pagination to page 1.
 Missing numeric values remain last regardless of order.
@@ -58,16 +64,17 @@ Missing numeric values remain last regardless of order.
 Click a stock symbol to open a keyboard-accessible popup. Existing technical
 signals appear immediately; quote details and news load on demand. Details include
 open, previous close, day and 52-week high/low, volume, RSI, moving averages, MACD,
-score, verdict, and reasons. Single-stock responses are cached for 60 seconds
+score, public signal, and reasons. Single-stock responses are cached for 60 seconds
 in server memory, with shared concurrent requests. Quote and retrieval timestamps
 are shown separately; prices may be delayed.
 
 News uses Yahoo Finance's public search endpoint with the company name and links
 to original publishers. Coverage varies; empty results and news failures are
 shown explicitly. Missing fields are labeled unavailable, not estimated.
-BUY/WATCH/AVOID are the existing technical score labels, not trading advice or
-broker buy/sell prices. This source does not provide fundamentals, valuations,
-order-book bid/ask, or analyst recommendations; the popup links to Yahoo Finance
-for additional research.
+Public labels are non-advisory trend signals, not trading advice or broker
+buy/sell prices. The internal BUY/WATCH/AVOID mapping is retained only for future
+special-customer features and is not shown in the public UI or API. This source
+does not provide fundamentals, valuations, order-book bid/ask, or analyst
+recommendations; the popup links to Yahoo Finance for additional research.
 
 The Streamlit prototype still uses its separate starter list in `python/app.py`.

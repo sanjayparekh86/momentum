@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import SignalBadge from "./SignalBadge";
 
 export default function StockDialog({ stock, onClose }) {
   const dialog = useRef(null);
@@ -48,7 +49,7 @@ export default function StockDialog({ stock, onClose }) {
             <p className="meta">{stock.symbol} · {details?.exchange || "NSE"}</p></div>
           <button autoFocus onClick={() => dialog.current.close()} aria-label="Close stock details">Close</button>
         </header>
-        <p><span className={`v ${info.verdict}`}>{info.verdict}</span> Technical signal, not a buy/sell recommendation.</p>
+        <p><SignalBadge signal={info.signal} /> Technical trend signal only, not a buy/sell recommendation or investment advice.</p>
         <ul className="signal-reasons">{info.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
         {loading && <p role="status" className="meta">Loading latest quote and company news…</p>}
         {error && <p role="alert" className="err">{error} <button onClick={() => setAttempt((n) => n + 1)}>Retry details</button></p>}

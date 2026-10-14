@@ -27,9 +27,9 @@ def analyze(sym):
     if l["RSI_14"] > 75: add(-2, "RSI overbought")
     if vol >= 2: add(1, f"Volume {vol:.1f}x")
     if l.Close / l["SMA_50"] > 1.3: add(-2, "Extended >30% over 50D")
-    verdict = "BUY" if score >= 4 else "WATCH" if score >= 2 else "AVOID"
+    signal = "Bullish" if score >= 4 else "Neutral" if score >= 2 else "Bearish"
     return dict(Stock=sym, Price=round(l.Close, 2), Change=round(chg, 2), RSI=round(l["RSI_14"], 1),
-                Volume=round(vol, 2), Score=score, Verdict=verdict, Why=" | ".join(why))
+                Volume=round(vol, 2), Score=score, Signal=signal, Why=" | ".join(why))
 
 st.title("Momentum screener")
 thr = st.slider("Minimum daily move (%)", 1.0, 10.0, 5.0, 0.5)
