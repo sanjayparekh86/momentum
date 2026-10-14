@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { getUniverse, parseSymbols } from "../lib/symbols.js";
-import { getDaily } from "../lib/yahoo.js";
-import { scanStocks, withAllTime, SCAN_TTL_MS } from "../lib/screener.js";
+import { getDaily, getNews } from "../lib/yahoo.js";
+import { scanStocks, withAllTime, getScanProgress, SCAN_TTL_MS } from "../lib/screener.js";
+import { getStockDetails } from "../lib/stock.js";
+import { selectMovers, sortsAscending } from "../lib/table.js";
 
 function chart(count = 40) {
   return Response.json({ chart: { result: [{
@@ -19,6 +21,113 @@ test("NSE parsing includes all rows, quoted names, special symbols, and deduplic
   assert.throws(() => parseSymbols("<html>Access denied</html>"), /invalid equity list/);
   assert.throws(() => parseSymbols("SYMBOL,NAME\n,Empty"), /invalid symbols/);
   assert.throws(() => parseSymbols("SYMBOL,NAME\n"), /invalid symbols/);
+});
+
+test("search and sorting are case insensitive, deterministic, and do not mutate results", () => {
+  const rows = [
+    { symbol: "XYZ", rangeChange: -8, score: 2, rsi: null },
+    { symbol: "TCS", name: "Tata Consultancy", rangeChange: 3, score: 4, rsi: 60 },
+    { symbol: "ABC", rangeChange: 8, score: 4, rsi: 50 },
+  ];
+  const symbols = (rows) => rows.map((row) => row.symbol);
+  assert.deepEqual(symbols(selectMovers(rows, "", "movement")), ["ABC", "XYZ", "TCS"]);
+  assert.deepEqual(symbols(selectMovers(rows, "", "gain")), ["ABC", "TCS", "XYZ"]);
+  assert.deepEqual(symbols(selectMovers(rows, "", "loss")), ["XYZ", "TCS", "ABC"]);
+  assert.deepEqual(symbols(selectMovers(rows, "", "symbol")), ["ABC", "TCS", "XYZ"]);
+  assert.deepEqual(symbols(selectMovers(rows, "", "symbol", true)), ["XYZ", "TCS", "ABC"]);
+  assert.deepEqual(symbols(selectMovers(rows, "", "score")), ["ABC", "TCS", "XYZ"]);
+  const verdicts = [
+    { symbol: "AVOID1", verdict: "AVOID", score: 1, rangeChange: 1 },
+    { symbol: "BUY4", verdict: "BUY", score: 4, rangeChange: 1 },
+    { symbol: "WATCH3", verdict: "WATCH", score: 3, rangeChange: 1 },
+    { symbol: "BUY5", verdict: "BUY", score: 5, rangeChange: 1 },
+    { symbol: "UNKNOWN", verdict: null, score: 9, rangeChange: 1 },
+  ];
+  assert.deepEqual(symbols(selectMovers(verdicts, "", "verdict")), ["BUY5", "BUY4", "WATCH3", "AVOID1", "UNKNOWN"]);
+  assert.deepEqual(symbols(selectMovers(verdicts, "", "verdict", true)), ["AVOID1", "WATCH3", "BUY4", "BUY5", "UNKNOWN"]);
+  const today = [{ symbol: "LOW", change: -2 }, { symbol: "HIGH", change: 4 }];
+  assert.deepEqual(symbols(selectMovers(today, "", "change")), ["HIGH", "LOW"]);
+  assert.equal(sortsAscending("symbol", false), true);
+  assert.equal(sortsAscending("score", false), false);
+  assert.equal(sortsAscending("score", true), true);
+  assert.deepEqual(symbols(selectMovers(rows, "", "rsi", true)), ["ABC", "TCS", "XYZ"]);
+  assert.deepEqual(symbols(selectMovers(rows, " tc ", "movement")), ["TCS"]);
+  assert.deepEqual(symbols(selectMovers(rows, "consultancy", "movement")), ["TCS"]);
+  assert.deepEqual(selectMovers(rows, "missing", "score"), []);
+  assert.deepEqual(symbols(rows), ["XYZ", "TCS", "ABC"]);
+});
+
+test("fresh full scans expose early batches without starting another scan", async (t) => {
+  const symbols = Array.from({ length: 21 }, (_, i) => `PART${i}`);
+  let release, reached;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const secondBatch = new Promise((resolve) => { reached = resolve; });
+  t.mock.method(globalThis, "fetch", async (url) => {
+    if (url.includes("PART10.NS")) { reached(); await gate; }
+    return chart();
+  });
+  const request = scanStocks(symbols, true);
+  await secondBatch;
+  const progress = getScanProgress(symbols);
+  assert.equal(progress.processed, 10);
+  assert.equal(progress.stocks.length, 10);
+  assert.equal(getScanProgress(["OTHER"]), null);
+  release();
+  assert.equal((await request).stocks.length, 21);
+  assert.equal(getScanProgress(symbols), null);
+});
+
+test("stock details fetch on demand, share requests, cache briefly, and keep quote timestamps", async (t) => {
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async (url) => {
+    calls++;
+    if (url.includes("/search")) return Response.json({ news: [{
+      title: "Company results", link: "https://example.com/results", publisher: "Test publisher",
+      providerPublishTime: 1700000000,
+    }, { title: "Unsafe link", link: "javascript:alert(1)" }] });
+    const data = await chart().json();
+    data.chart.result[0].meta = {
+      longName: "Test Company", currency: "INR", regularMarketPrice: 140,
+      regularMarketTime: 1700000000, regularMarketDayHigh: 141, regularMarketDayLow: 130,
+      fiftyTwoWeekHigh: 150, fiftyTwoWeekLow: 80, regularMarketVolume: 123456,
+    };
+    const quote = data.chart.result[0].indicators.quote[0];
+    quote.open = Array(40).fill(135);
+    return Response.json(data);
+  });
+  const [a, b] = await Promise.all([getStockDetails("DETAIL"), getStockDetails("DETAIL")]);
+  assert.strictEqual(a, b);
+  assert.strictEqual(await getStockDetails("DETAIL"), a);
+  assert.equal(calls, 2);
+  assert.equal(a.name, "Test Company");
+  assert.equal(a.open, 135);
+  assert.equal(a.dayHigh, 141);
+  assert.equal(a.yearLow, 80);
+  assert.equal(a.previousClose, 138);
+  assert.equal(a.marketPrice, 140);
+  assert.equal(a.quoteAt, new Date(1700000000000).toISOString());
+  assert.equal(a.news.length, 1);
+  assert.equal(a.newsError, null);
+  assert.ok(Number.isFinite(a.macd));
+  const now = Date.now();
+  t.mock.method(Date, "now", () => now + 60001);
+  assert.notStrictEqual(await getStockDetails("DETAIL"), a);
+  assert.equal(calls, 4);
+});
+
+test("stock details report unavailable news and never invent missing price fields", async (t) => {
+  t.mock.method(globalThis, "fetch", async (url) => url.includes("/search")
+    ? new Response("", { status: 503 }) : chart());
+  const details = await getStockDetails("NONEWS");
+  assert.match(details.newsError, /503/);
+  assert.deepEqual(details.news, []);
+  assert.equal(details.yearHigh, null);
+  assert.equal(details.open, null);
+  assert.equal(details.quoteAt, null);
+  globalThis.fetch = async () => new Response("", { status: 404 });
+  await assert.rejects(getStockDetails("BADQUOTE"), /404/);
+  globalThis.fetch = async () => Response.json({});
+  await assert.rejects(getNews("Company"), /invalid news data/);
 });
 
 test("NSE list requests share the fetch and cache a successful list", async (t) => {
