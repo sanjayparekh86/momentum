@@ -29,12 +29,17 @@ unofficial chart endpoint; real-time availability is not guaranteed.
 
 The page refreshes every 5 minutes while visible. Completed full-market scans
 are cached in server memory for 5 minutes, and concurrent full-market requests
-share one scan. A fresh scan can take several minutes. Changing the percentage,
-direction, or date range reuses the cached daily history. All-time analysis may
+share one scan. Downloads run in batches of 4 to reduce peak load. Each stock's
+indicators and range changes are computed once, then its daily bars are released;
+the cache and progress snapshots retain only compact results, not a year of
+daily price objects for every stock. Expired full-market results are released
+before starting a replacement scan.
+A fresh scan can take several minutes. Changing the percentage,
+direction, or date range reuses the cached results without recomputing indicators. All-time analysis may
 take longer on its first request because it also fetches historical starting prices.
 The scan timestamp is the completion time, not the provider's quote timestamp.
 Fresh scans expose batches as they complete; the dashboard checks progress every
-2 seconds while waiting. Partial counts are explicitly labeled as incomplete.
+5 seconds while waiting. Partial counts are explicitly labeled as incomplete.
 Existing completed results remain usable during refreshes. All-time results still
 wait for historical enrichment before being shown.
 
@@ -48,6 +53,11 @@ stocks shown with limited information. NSE list failures and Yahoo rate limits
 fail the request explicitly rather than falling back to a smaller universe.
 Custom `symbols` requests bypass the full-market scan cache. History is saved
 only for Today.
+
+For lower local overhead, use `npm run build` followed by `npm start` instead
+of the development server, which also keeps compilation and hot-reload state.
+Run only one server for this project at a time. Building itself uses additional
+memory; stop the development server before building.
 
 ## Search, sorting, and stock details
 

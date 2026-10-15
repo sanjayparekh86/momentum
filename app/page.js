@@ -7,6 +7,7 @@ import StockDialog from "./StockDialog";
 
 const REFRESH_MS = 300000;
 const PAGE_SIZE = 100;
+const PROGRESS_MS = 5000;
 
 export default function Home() {
   const [data, setData] = useState(null);
@@ -50,9 +51,9 @@ export default function Home() {
         }
         return;
       }
-      if (!finished && !controller.signal.aborted) timer = setTimeout(poll, 2000);
+      if (!finished && !controller.signal.aborted) timer = setTimeout(poll, PROGRESS_MS);
     };
-    if (range !== "all") timer = setTimeout(poll, 2000);
+    if (range !== "all") timer = setTimeout(poll, PROGRESS_MS);
     try {
       const r = await fetch(`/api/screener?${params}&save=1`, { signal: controller.signal });
       const json = await r.json();

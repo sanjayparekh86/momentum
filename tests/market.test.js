@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { getUniverse, parseSymbols } from "../lib/symbols.js";
 import { getDaily, getNews } from "../lib/yahoo.js";
-import { scanStocks, withAllTime, getScanProgress, SCAN_TTL_MS } from "../lib/screener.js";
+import { scanStocks, withAllTime, getScanProgress, SCAN_TTL_MS, SCAN_CONCURRENCY } from "../lib/screener.js";
 import { getStockDetails } from "../lib/stock.js";
 import { selectMovers, sortsAscending, matchesMove } from "../lib/table.js";
 import { analyze, adviceVerdict, signalFor } from "../lib/verdict.js";
@@ -93,18 +93,43 @@ test("fresh full scans expose early batches without starting another scan", asyn
   const gate = new Promise((resolve) => { release = resolve; });
   const secondBatch = new Promise((resolve) => { reached = resolve; });
   t.mock.method(globalThis, "fetch", async (url) => {
-    if (url.includes("PART10.NS")) { reached(); await gate; }
+    if (url.includes(`PART${SCAN_CONCURRENCY}.NS`)) { reached(); await gate; }
     return chart();
   });
   const request = scanStocks(symbols, true);
   await secondBatch;
   const progress = getScanProgress(symbols);
-  assert.equal(progress.processed, 10);
-  assert.equal(progress.stocks.length, 10);
+  assert.equal(progress.processed, SCAN_CONCURRENCY);
+  assert.equal(progress.stocks.length, SCAN_CONCURRENCY);
+  assert.equal("rows" in progress.stocks[0], false);
   assert.equal(getScanProgress(["OTHER"]), null);
   release();
   assert.equal((await request).stocks.length, 21);
+  assert.equal(progress.stocks.length, SCAN_CONCURRENCY);
   assert.equal(getScanProgress(symbols), null);
+});
+
+test("scan summaries preserve exact signals and every range without retaining daily bars", async (t) => {
+  const count = 252;
+  t.mock.method(globalThis, "fetch", async () => chart(count));
+  const bars = await getDaily("SUMMARY");
+  const scan = await scanStocks(["SUMMARY"]);
+  const stock = scan.stocks[0];
+  assert.deepEqual(stock.analysis, analyze(bars));
+  assert.equal(stock.latestClose, bars.at(-1).c);
+  for (const range of ["1d", "5d", "1mo", "3mo", "1y"]) {
+    assert.equal(stock.changes[range], rangeChange(bars, range));
+  }
+  assert.equal("rows" in stock, false);
+  const rawBytes = Buffer.byteLength(JSON.stringify({ symbol: stock.symbol, rows: bars }));
+  const summaryBytes = Buffer.byteLength(JSON.stringify(stock));
+  assert.ok(summaryBytes < rawBytes * 0.05,
+    `Retained summary ${summaryBytes} bytes must be under 5% of raw history ${rawBytes} bytes`);
+  globalThis.fetch = async () => chart(1);
+  const short = (await scanStocks(["SHORTSUMMARY"])).stocks[0];
+  assert.equal(short.analysis.signal, "INSUFFICIENT");
+  assert.equal(short.analysis.price, 100);
+  assert.deepEqual(Object.values(short.changes), [null, null, null, null, null]);
 });
 
 test("stock details fetch on demand, share requests, cache briefly, and keep quote timestamps", async (t) => {
@@ -205,7 +230,7 @@ test("full scans cover more than 100 symbols, limit concurrency, and share the f
   assert.strictEqual(a, b);
   assert.strictEqual(await scanStocks(symbols, true), a);
   assert.equal(calls, 205);
-  assert.equal(peak, 10);
+  assert.equal(peak, 4);
   const now = Date.now();
   t.mock.method(Date, "now", () => now + SCAN_TTL_MS + 1);
   const fresh = await scanStocks(symbols, true);
@@ -234,9 +259,30 @@ test("rate limits stop the scan before requesting later batches", async (t) => {
     return new Response("", { status: 429 });
   });
   await assert.rejects(scanStocks(Array.from({ length: 25 }, (_, i) => `RATE${i}`), true), /429/);
-  assert.equal(calls, 10);
+  assert.equal(calls, SCAN_CONCURRENCY);
   globalThis.fetch = async () => chart();
   assert.equal((await scanStocks(["RECOVERED"], true)).stocks.length, 1);
+});
+
+test("failed scans wait for outstanding batch downloads before accepting a retry", async (t) => {
+  let release, finished = false, active = 0;
+  const gate = new Promise((resolve) => { release = resolve; });
+  t.mock.method(globalThis, "fetch", async (url) => {
+    if (url.includes("DRAIN0.NS")) return new Response("", { status: 429 });
+    active++;
+    await gate;
+    active--;
+    return chart();
+  });
+  const request = scanStocks(Array.from({ length: 8 }, (_, i) => `DRAIN${i}`), true)
+    .catch((error) => { finished = true; return error; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(active, SCAN_CONCURRENCY - 1);
+  assert.equal(finished, false);
+  release();
+  assert.match((await request).message, /429/);
+  assert.equal(active, 0);
+  assert.equal(getScanProgress(["DRAIN0"]), null);
 });
 
 test("all-time failures are reported, not replaced with one-year history; derived scans are shared", async (t) => {
@@ -245,7 +291,8 @@ test("all-time failures are reported, not replaced with one-year history; derive
     calls++;
     return url.includes("NOHISTORY") ? new Response("", { status: 404 }) : chart();
   });
-  const scan = { stocks: [{ symbol: "HISTORY", rows: [] }, { symbol: "NOHISTORY", rows: [] }],
+  const scan = { stocks: [{ symbol: "HISTORY", latestClose: 139, changes: { "1d": 0.72 } },
+    { symbol: "NOHISTORY", latestClose: 139, changes: { "1d": 0.72 } }],
     unavailable: [{ symbol: "MISSING", reason: "No daily data" }], updatedAt: "2026-10-14T00:00:00Z" };
   const [a, b] = await Promise.all([withAllTime(scan), withAllTime(scan)]);
   assert.strictEqual(a, b);
@@ -253,6 +300,9 @@ test("all-time failures are reported, not replaced with one-year history; derive
   assert.equal(calls, 2);
   assert.equal(a.stocks.length, 1);
   assert.equal(a.stocks[0].firstClose, 100);
+  assert.equal(a.stocks[0].changes.all, 39);
+  assert.equal(a.stocks[0].changes["1d"], 0.72);
+  assert.equal(scan.stocks[0].changes.all, undefined);
   assert.equal(a.unavailable.length, 2);
   assert.equal(a.updatedAt, scan.updatedAt);
 });

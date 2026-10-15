@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { getUniverse } from "@/lib/symbols";
 import { scanStocks, withAllTime, getScanProgress, SCAN_TTL_MS } from "@/lib/screener";
-import { analyze, insufficient } from "@/lib/verdict";
+import { insufficient } from "@/lib/verdict";
 import { matchesMove } from "@/lib/table";
 import { saveSignals } from "@/lib/db";
-import { RANGES, rangeChange } from "@/lib/ranges";
+import { RANGES } from "@/lib/ranges";
 
 export const dynamic = "force-dynamic";
 
@@ -28,8 +28,8 @@ export async function GET(req) {
     let scan = partial ? getScanProgress(symbols) : await scanStocks(symbols, !custom);
     if (!scan) return NextResponse.json({ pending: true });
     if (range === "all") scan = await withAllTime(scan);
-    const analyzed = scan.stocks.map(({ symbol, rows, firstClose }) => ({
-      symbol, ...analyze(rows), rangeChange: rangeChange(rows, range, firstClose),
+    const analyzed = scan.stocks.map(({ symbol, analysis, changes }) => ({
+      symbol, ...analysis, rangeChange: changes[range],
     }));
     const results = [...analyzed, ...scan.unavailable.map(({ symbol, reason }) => ({
       symbol, ...insufficient([], `No usable price data: ${reason}`), rangeChange: null,
