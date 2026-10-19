@@ -5,21 +5,14 @@ import { deadlineClose, evaluatePrediction, exchangeDate, exportJournal, importJ
 import { journalTransaction } from "@/lib/journal-storage";
 import useJournal from "./useJournal";
 import Link from "next/link";
+import { marketData } from "@/lib/journal-market-client";
+import { PriceAlertControls } from "./PriceAlerts";
 
 const money = (n) => Number.isFinite(n) ? `INR ${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}` : "Unavailable";
 const percent = (n) => Number.isFinite(n) ? `${n > 0 ? "+" : ""}${n.toFixed(2)}%` : "-";
 const priceChange = (n) => `${n > 0 ? "+" : n < 0 ? "-" : ""}${money(Math.abs(n))}`;
 const initialForm = { symbol: "", bucketId: "", direction: "up", targetPercent: "", deadline: "", reason: "", confidence: "" };
 const shortDate = (value, timeZone) => new Date(value).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone });
-
-async function marketData(symbol, from, signal) {
-  const params = new URLSearchParams({ symbol });
-  if (from != null) params.set("from", String(Math.max(0, Math.floor(from / 1000) - 86400)));
-  const response = await fetch(`/api/journal-market?${params}`, { signal, cache: "no-store" });
-  const json = await response.json();
-  if (!response.ok) throw new Error(json.error || `Market request failed (${response.status}).`);
-  return json;
-}
 
 export default function PredictionJournal({ symbol = "", initialView = "history", onClose, onStock }) {
   const { data, setData, error: storageError, reload } = useJournal();
@@ -257,6 +250,7 @@ export default function PredictionJournal({ symbol = "", initialView = "history"
           </div>
         </div>
         <div className="local-notice"><span className="local-dot" aria-hidden="true" /><span>Stored on this device only. <strong>No account needed.</strong> Export a backup before clearing browser data.</span></div>
+        {!isDialog && <PriceAlertControls />}
         {(error || storageError) && <p className="journal-feedback err" role="alert">{error || storageError} {!ready && <button className="btn btn-secondary" onClick={() => run(reload)}>Retry storage</button>}</p>}
         {notice && <p className="journal-feedback" role="status">{notice}</p>}
         <input ref={upload} type="file" accept=".csv,text/csv" hidden onChange={importFile} aria-label="Import journal CSV" />

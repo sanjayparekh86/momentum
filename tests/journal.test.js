@@ -4,6 +4,9 @@ import { CSV_FIELDS, JOURNAL_SOURCE, deadlineClose, emptyJournal, evaluatePredic
   exportJournal, hasJournalStock, importJournal, mergeJournals, newPrediction, outcome, parseCSV, predictionProgress, validDeadline, validateJournal } from "../lib/journal.js";
 import { getJournalMarket } from "../lib/yahoo.js";
 import { journalTransaction } from "../lib/journal-storage.js";
+import { ALERT_INTERVAL_MS, ALERT_LEASE_MS, alertCandidates, claimAlertCheck, emptyAlerts,
+  targetReached, validateAlerts } from "../lib/price-alerts.js";
+import { checkPriceAlerts } from "../lib/price-alert-monitor.js";
 
 const now = Date.parse("2026-10-19T10:00:00+05:30");
 const quote = { price: 100, at: new Date(now - 60000).toISOString() };
@@ -21,6 +24,158 @@ function journal(p = prediction()) {
 const closeTime = Date.parse("2026-10-20T18:00:00+05:30");
 const market = (price) => ({ quote: { price, at: new Date(deadlineClose("2026-10-20")).toISOString() },
   rows: [{ t: Date.parse("2026-10-20T09:15:00+05:30") / 1000, c: price }], splits: [] });
+
+test("alerts opt in and claim only one check per 30 minutes across tabs", () => {
+  const disabled = emptyAlerts();
+  assert.equal(claimAlertCheck(disabled, "tab1", now), disabled);
+  const enabled = { ...disabled, enabled: true };
+  const claimed = claimAlertCheck(enabled, "tab1", now);
+  assert.equal(ALERT_INTERVAL_MS, 30 * 60000);
+  assert.equal(claimed.owner, "tab1");
+  assert.equal(claimed.leaseUntil, now + ALERT_LEASE_MS);
+  assert.equal(claimAlertCheck(claimed, "tab2", now + 1000), claimed);
+  assert.equal(claimAlertCheck(claimed, "tab2", now + ALERT_LEASE_MS).owner, "tab2");
+  const checked = { ...enabled, lastChecked: now };
+  assert.equal(claimAlertCheck(checked, "tab2", now + ALERT_INTERVAL_MS - 1), checked);
+  assert.equal(claimAlertCheck(checked, "tab2", now + ALERT_INTERVAL_MS).owner, "tab2");
+  assert.throws(() => validateAlerts({ ...enabled, sent: [] }), /Invalid local/);
+  assert.throws(() => validateAlerts({ ...enabled, lastChecked: NaN }), /Invalid local/);
+  assert.equal(validateAlerts(enabled), enabled);
+});
+
+test("target notifications require pending targets, fresh post-creation quotes, and respect deadlines", () => {
+  const up = prediction({ targetPercent: "5" });
+  const down = prediction({ direction: "down", targetPercent: "5" });
+  const checkedAt = now + 60000;
+  const observation = (price, at = checkedAt) => ({ quote: { price, at: new Date(at).toISOString() }, splits: [] });
+  assert.equal(targetReached(up, observation(105), checkedAt), true);
+  assert.equal(targetReached(up, observation(104), checkedAt), false);
+  assert.equal(targetReached(down, observation(95), checkedAt), true);
+  assert.equal(targetReached(down, observation(96), checkedAt), false);
+  assert.equal(targetReached(down, observation(106), checkedAt), false);
+  assert.equal(targetReached(up, observation(100), checkedAt), false);
+  assert.equal(targetReached(up, observation(105, now - 1), checkedAt), false);
+  assert.equal(targetReached(up, observation(105, checkedAt + 1), checkedAt), false);
+  assert.equal(targetReached(up, observation(105), checkedAt + ALERT_INTERVAL_MS + 1), false);
+  assert.equal(targetReached(up, { quote: null }, checkedAt), false);
+  assert.equal(targetReached(up, observation(NaN), checkedAt), false);
+  assert.equal(targetReached(prediction(), observation(110), checkedAt), false);
+  assert.equal(targetReached({ ...up, status: "cancelled" }, observation(110), checkedAt), false);
+  assert.equal(targetReached({ ...up, status: "completed" }, observation(110), checkedAt), false);
+  assert.equal(targetReached(up, observation(110), deadlineClose(up.deadline) + 1), false);
+  assert.equal(targetReached(up, { ...observation(110), splits: [{ t: checkedAt / 1000 }] }, checkedAt), false);
+  assert.deepEqual(alertCandidates([up, prediction(), { ...up, id: "cancelled", status: "cancelled" }], {}, checkedAt), [up]);
+  assert.deepEqual(alertCandidates([up], { [up.id]: checkedAt }, checkedAt), []);
+  assert.equal(up.status, "pending");
+  assert.equal(up.evaluation, null);
+});
+
+function alertHarness(predictions = [prediction({ targetPercent: "5" })]) {
+  let state = { ...emptyAlerts(), enabled: true };
+  let saved = { ...journal(), predictions };
+  let clock = now + 60000;
+  const notified = [], requests = [];
+  const adapters = {
+    owner: "tab1", now: () => clock, active: () => true,
+    settings: async (update) => {
+      if (update) state = validateAlerts(update(structuredClone(state)));
+      return structuredClone(state);
+    },
+    journal: async (update) => {
+      if (update) saved = validateJournal(update(structuredClone(saved)));
+      return structuredClone(saved);
+    },
+    fetchMarket: async (symbol, from) => {
+      requests.push({ symbol, from });
+      return { quote: { price: 105, at: new Date(clock).toISOString() }, splits: [] };
+    },
+    notify: (p, q) => notified.push({ id: p.id, quote: q }),
+  };
+  return { adapters, notified, requests, get state() { return state; }, get saved() { return saved; },
+    advance: () => { clock += ALERT_INTERVAL_MS; } };
+}
+
+test("alert checks fetch each eligible symbol once, persist quotes, deduplicate, and preserve final evidence", async () => {
+  const pending = prediction({ targetPercent: "5" });
+  const second = { ...pending, id: "p2" };
+  const completed = evaluatePrediction({ ...pending, id: "done" }, market(105), closeTime).prediction;
+  const h = alertHarness([pending, second, completed]);
+  await checkPriceAlerts(h.adapters);
+  assert.deepEqual(h.requests, [{ symbol: "TCS", from: Date.parse(pending.referenceAt) }]);
+  assert.deepEqual(h.notified.map((n) => n.id), ["p1", "p2"]);
+  assert.equal(h.saved.predictions[0].latest.price, 105);
+  assert.equal(h.saved.predictions[0].status, "pending");
+  assert.deepEqual(h.saved.predictions[2].evaluation, completed.evaluation);
+  assert.equal(h.state.owner, null);
+  assert.equal(h.state.leaseUntil, 0);
+  assert.equal(h.state.error, "");
+  await checkPriceAlerts(h.adapters);
+  assert.equal(h.requests.length, 1);
+  h.advance();
+  await checkPriceAlerts(h.adapters);
+  assert.equal(h.requests.length, 1);
+  assert.equal(h.notified.length, 2);
+  await h.adapters.settings((s) => ({ ...s, enabled: false, lastChecked: 0 }));
+  await checkPriceAlerts(h.adapters);
+  assert.equal(h.requests.length, 1);
+});
+
+test("notification failures are visible, release reservations and leases, and retry at the next interval", async () => {
+  const h = alertHarness();
+  await checkPriceAlerts({ ...h.adapters, notify: () => { throw new Error("Notifications unsupported"); } });
+  assert.match(h.state.error, /TCS: Notifications unsupported/);
+  assert.deepEqual(h.state.sent, {});
+  assert.equal(h.state.owner, null);
+  h.advance();
+  await checkPriceAlerts(h.adapters);
+  assert.equal(h.notified.length, 1);
+  assert.equal(h.state.error, "");
+  const failed = alertHarness();
+  await checkPriceAlerts({ ...failed.adapters, fetchMarket: async () => { throw new Error("Provider unavailable"); } });
+  assert.match(failed.state.error, /Provider unavailable/);
+  assert.deepEqual(failed.state.sent, {});
+  assert.equal(failed.state.owner, null);
+});
+
+test("newly imported predictions wait for a check covering their own reference history", async () => {
+  const h = alertHarness();
+  await checkPriceAlerts({ ...h.adapters, fetchMarket: async (...args) => {
+    await h.adapters.journal((data) => ({ ...data, predictions: [...data.predictions,
+      { ...prediction({ targetPercent: "5" }), id: "imported", referenceAt: new Date(now - 86400000).toISOString() }] }));
+    return h.adapters.fetchMarket(...args);
+  } });
+  assert.deepEqual(h.notified.map((item) => item.id), ["p1"]);
+  h.advance();
+  await checkPriceAlerts(h.adapters);
+  assert.equal(h.requests[1].from, now - 86400000);
+  assert.deepEqual(h.notified.map((item) => item.id), ["p1", "imported"]);
+});
+
+test("checks stop on abort, ownership loss, or opt-out during a fetch, without notifying", async () => {
+  const inactive = alertHarness();
+  await checkPriceAlerts({ ...inactive.adapters, active: () => false });
+  assert.equal(inactive.state.owner, null);
+  assert.equal(inactive.requests.length, 0);
+  const aborted = alertHarness();
+  let active = true;
+  await checkPriceAlerts({ ...aborted.adapters, active: () => active, fetchMarket: async (...args) => {
+    active = false;
+    return aborted.adapters.fetchMarket(...args);
+  } });
+  assert.equal(aborted.notified.length, 0);
+  assert.equal(aborted.state.owner, null);
+  assert.equal(aborted.state.lastChecked, 0);
+  for (const enabled of [true, false]) {
+    const h = alertHarness();
+    await checkPriceAlerts({ ...h.adapters, fetchMarket: async (...args) => {
+      await h.adapters.settings((s) => ({ ...s, enabled, owner: "another-tab" }));
+      return h.adapters.fetchMarket(...args);
+    } });
+    assert.equal(h.notified.length, 0);
+    assert.deepEqual(h.state.sent, {});
+    assert.equal(h.state.owner, "another-tab");
+  }
+});
 
 test("prediction terms validate future India weekdays, quote freshness, targets and confidence", () => {
   assert.equal(exchangeDate("2026-10-19T20:00:00Z"), "2026-10-20");

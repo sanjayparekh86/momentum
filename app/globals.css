@@ -103,6 +103,12 @@ textarea { font:inherit; color:var(--ink); background:var(--card); border:1px so
 .local-notice { display:flex; align-items:baseline; gap:9px; padding:12px 14px; border:1px solid var(--line); border-radius:9px; color:var(--mute); font-size:12px; background:var(--card); }
 .local-dot { flex:0 0 6px; height:6px; border-radius:50%; background:var(--up); align-self:center; }
 .local-notice strong { color:var(--ink); font-weight:500; }
+.price-alert-controls { display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:16px; padding:16px; margin:14px 0; background:var(--card); border:1px solid var(--line); border-radius:10px; }
+.price-alert-controls > div { flex:1 1 260px; min-width:0; }
+.price-alert-controls strong { font-size:13px; }
+.price-alert-controls p { margin:7px 0; font-size:12px; }
+.price-alert-controls small { color:var(--mute); font-size:11px; }
+.price-alert-controls .err { overflow-wrap:anywhere; }
 .journal-feedback { padding:12px 14px; border-left:3px solid var(--up); background:var(--accent-soft); border-radius:6px; font-size:13px; overflow-wrap:anywhere; }
 .journal-feedback.err { background:var(--negative-soft); border-color:var(--down); }
 .journal-stats { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:14px; margin:22px 0; }

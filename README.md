@@ -117,6 +117,37 @@ missing quotes remain unavailable or show the last saved observation.
 The refresh icon beside each prediction's current price checks only that stock,
 updating all its predictions across buckets. It shows a loading indicator while
 the request runs; failures are displayed without discarding the saved quote.
+
+### Opt-in browser target alerts
+
+On the Watchlist page, **Enable browser alerts** requests notification permission.
+Alerts are off by default. Once enabled, Momentum checks immediately and then
+every **30 minutes** while any Momentum page remains open (including the screener).
+The scheduler checks whether work is due once a minute and on returning to a tab.
+Background/browser sleep can delay checks; no service worker, web push, or
+closed-browser background job is provided.
+
+Only pending predictions with percentage targets and unexpired deadlines are
+checked. Quotes must be after prediction creation, no older than 30 minutes,
+and at/before the deadline. Up alerts trigger at/above the target and down alerts
+at/below it. Reported splits block alerts. These are sampled price observations,
+not proof of an intraday touch; brief moves between checks may be missed. A
+target alert never marks the deadline prediction correct or overwrites its result.
+Checks also save the latest quotes to the local prediction table.
+
+Each prediction is notified once per browser profile. Local IndexedDB settings
+and notification markers are separate from CSV backups: notification permissions
+and opt-in are not imported/exported. Tabs coordinate checks with an atomic
+expiring lease to avoid duplicate checks and alerts. Disable alerts with **Turn
+alerts off**. Failures and last-check time are shown in the alert controls.
+An interruption during notification delivery can lose that alert; this is
+best-effort, not a guaranteed trading alert service.
+
+Requires HTTPS (localhost is allowed), a browser exposing page Notifications,
+and browser/OS notification permission. Some mobile browsers do not support
+page notifications even when the permission API exists; delivery failures are
+reported explicitly. Quotes and notifications may be delayed. No signup,
+push service, new market-data provider, or server journal persistence is used.
 Screener rows and stock details have **Watch / Predict** entry points that open
 a dialog for the selected stock, not an inline screener form. Stocks already
 watched in any bucket (or with retained prediction history) show **View your
