@@ -4,6 +4,10 @@ import { RANGES } from "@/lib/ranges";
 import { SORT_OPTIONS, selectMovers, sortsAscending } from "@/lib/table";
 import SignalBadge from "./SignalBadge";
 import StockDialog from "./StockDialog";
+import PredictionJournal from "./PredictionJournal";
+import Link from "next/link";
+import useJournal from "./useJournal";
+import { hasJournalStock } from "@/lib/journal";
 
 const REFRESH_MS = 300000;
 const PAGE_SIZE = 100;
@@ -15,11 +19,14 @@ export default function Home() {
   const [thresholdText, setThresholdText] = useState("5");
   const [direction, setDirection] = useState("both");
   const [range, setRange] = useState("1d");
+  const [scanOptions, setScanOptions] = useState({ threshold: 5, direction: "both", range: "1d" });
   const [page, setPage] = useState(1);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("movement");
   const [reverse, setReverse] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [journalSelection, setJournalSelection] = useState(null);
+  const { data: journalData, error: journalError } = useJournal();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const reqId = useRef(0);
@@ -27,6 +34,7 @@ export default function Home() {
   const request = useRef(null);
 
   const load = useCallback(async () => {
+    const { threshold, direction, range } = scanOptions;
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
@@ -62,7 +70,7 @@ export default function Home() {
     } catch (e) { if (!controller.signal.aborted && id === reqId.current) setError(e.message); }
     finally { finished = true; clearTimeout(timer); }
     if (id === reqId.current) { inFlight.current = false; setLoading(false); }
-  }, [threshold, direction, range]);
+  }, [scanOptions]);
 
   // Only refresh while visible; local search and sorting never start a scan.
   useEffect(() => {
@@ -73,7 +81,17 @@ export default function Home() {
     return () => { clearInterval(t); document.removeEventListener("visibilitychange", tick); request.current?.abort(); };
   }, [load]);
 
-  useEffect(() => { setPage(1); }, [threshold, direction, range, query, sort, reverse]);
+  useEffect(() => { setPage(1); }, [scanOptions, query, sort, reverse]);
+
+  const optionsChanged = threshold !== scanOptions.threshold || direction !== scanOptions.direction || range !== scanOptions.range;
+  const manualScan = () => {
+    if (optionsChanged) setScanOptions({ threshold, direction, range });
+    else load();
+  };
+  const openJournal = (stock) => {
+    setSelected(null);
+    setJournalSelection({ symbol: stock.symbol, view: hasJournalStock(journalData, stock.symbol) ? "history" : "create" });
+  };
 
   const movers = useMemo(() => selectMovers(data?.movers || [], query, sort, reverse), [data, query, sort, reverse]);
   const pages = Math.max(1, Math.ceil(movers.length / PAGE_SIZE));
@@ -98,10 +116,11 @@ export default function Home() {
 
   return (
     <main>
-    <h2>Technical signals only, not investment advice. Check news and results for why a stock moved.</h2>
+    <p className="meta screener-notice">Technical signals only, not investment advice. Check news and results for why a stock moved.</p>
       <header>
-        <h1>Movers over {threshold}% {RANGES[range].title}</h1>
+        <h1>Movers over {data?.threshold ?? scanOptions.threshold}% {RANGES[data?.range || scanOptions.range].title}</h1>
         <div className="controls">
+          <Link className="button-link" href="/watchlist">My watchlist</Link>
           <label>Move ≥
             <input type="text" inputMode="decimal" enterKeyHint="done" autoComplete="off" value={thresholdText}
                    aria-label="Minimum move percentage"
@@ -121,13 +140,15 @@ export default function Home() {
           <select value={direction} onChange={(e) => setDirection(e.target.value)} aria-label="Direction">
             <option value="both">Up and down</option><option value="up">Up only</option><option value="down">Down only</option>
           </select>
-          <button onClick={load} disabled={loading}>{loading ? "Scanning…" : "Rescan"}</button>
+          <button className="btn btn-primary" onClick={manualScan} disabled={loading}>{loading ? "Scanning…" : "Rescan"}</button>
         </div>
       </header>
+      {optionsChanged && <p className="meta" role="status">Options changed. Click Rescan to apply them; existing results still use the previous scan settings.</p>}
+      {journalError && <p className="err" role="alert">{journalError} Journal membership could not be loaded.</p>}
 
       {error && <p className="err">{error}. Check your connection and rescan.</p>}
       {loading && <p className="meta" role="status">Scanning all NSE equities. Results appear as batches finish; existing results stay usable.
-        {range === "all" && " All-time results appear once historical enrichment is complete."}</p>}
+        {scanOptions.range === "all" && " All-time results appear once historical enrichment is complete."}</p>}
       {data && <p className="meta">{data.count} matches from {data.available} analyzed / {data.scanned} listed stocks
         {data.insufficient > 0 && ` (${data.insufficient} with insufficient data)`}.
         {data.partial ? ` Scan in progress: ${data.processed} / ${data.scanned} checked. Results are incomplete.`
@@ -152,7 +173,7 @@ export default function Home() {
             {!isToday && sortHeader("gain", RANGES[data.range].label)}
             {sortHeader(isToday ? "gain" : "change", isToday ? "Change" : "Today")}
             {sortHeader("rsi", "RSI")}{sortHeader("volRatio", "Volume")}{sortHeader("score", "Score")}
-            {sortHeader("signal", "Signal")}<th>Why</th></tr></thead>
+            {sortHeader("signal", "Signal")}<th>Why</th><th>Journal</th></tr></thead>
           <tbody>{rows.map((m) => (
             <tr key={m.symbol} className={m.insufficient ? "insufficient" : undefined}>
               <td data-label="Stock" className="stock-cell"><button className="stock-link" onClick={() => setSelected(m)} aria-label={`View ${m.symbol} details`}>{m.symbol}</button></td>
@@ -164,11 +185,15 @@ export default function Home() {
               <td data-label="Score">{m.score ?? "-"}</td>
               <td data-label="Signal"><SignalBadge signal={m.signal} /></td>
               <td data-label="Why" className="why">{m.reasons.join(" · ")}</td>
+              <td data-label="Journal"><button className={`btn btn-small ${hasJournalStock(journalData, m.symbol) ? "btn-ghost" : "btn-secondary"}`} onClick={() => openJournal(m)}>{hasJournalStock(journalData, m.symbol) ? "View your prediction" : "+ Watch / Predict"}</button></td>
             </tr>))}
           </tbody>
         </table></div>
       )}
-      {selected && <StockDialog key={selected.symbol} stock={selected} onClose={() => setSelected(null)} />}
+      {selected && <StockDialog key={selected.symbol} stock={selected} onClose={() => setSelected(null)} onJournal={openJournal}
+        hasPrediction={hasJournalStock(journalData, selected.symbol)} />}
+      {journalSelection && <PredictionJournal key={journalSelection.symbol} symbol={journalSelection.symbol}
+        initialView={journalSelection.view} onClose={() => setJournalSelection(null)} onStock={setSelected} />}
 
       {pages > 1 && (
         <nav className="pager" aria-label="Pagination">

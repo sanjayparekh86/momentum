@@ -35,7 +35,9 @@ the cache and progress snapshots retain only compact results, not a year of
 daily price objects for every stock. Expired full-market results are released
 before starting a replacement scan.
 A fresh scan can take several minutes. Changing the percentage,
-direction, or date range reuses the cached results without recomputing indicators. All-time analysis may
+direction, or date range only edits draft options: click **Rescan** to apply them.
+Automatic refresh continues using the last applied options, not unsaved edits.
+Rescans reuse cached results without recomputing indicators. All-time analysis may
 take longer on its first request because it also fetches historical starting prices.
 The scan timestamp is the completion time, not the provider's quote timestamp.
 Fresh scans expose batches as they complete; the dashboard checks progress every
@@ -86,5 +88,66 @@ buy/sell prices. The internal BUY/WATCH/AVOID mapping is retained only for futur
 special-customer features and is not shown in the public UI or API. This source
 does not provide fundamentals, valuations, order-book bid/ask, or analyst
 recommendations; the popup links to Yahoo Finance for additional research.
+
+## Local watchlists and prediction journal
+
+Use the screener's top **My watchlist & predictions** button to open `/watchlist`.
+That separate page lists buckets, watched stocks, and all predictions in tables
+with bucket tabs, a status filter, summary cards and pagination; on small screens
+scroll horizontally to view every column. **Add stock** opens a two-part entry
+form; use **Watch only** to save without a prediction. In prediction history,
+**Details** expands the original reasoning, price evidence, learning notes, and
+repeat/cancel actions. CSV backups are under **Import / Export**.
+Each prediction shows the latest available market quote and its timestamp,
+plus rupee/percentage movement since its reference price. Direction/target
+progress is provisional and separate from the locked deadline result.
+**Refresh prices** also updates completed/cancelled predictions without changing
+their original evaluation. Quotes may be delayed or from the previous session;
+missing quotes remain unavailable or show the last saved observation.
+The refresh icon beside each prediction's current price checks only that stock,
+updating all its predictions across buckets. It shows a loading indicator while
+the request runs; failures are displayed without discarding the saved quote.
+Screener rows and stock details have **Watch / Predict** entry points that open
+a dialog for the selected stock, not an inline screener form. Stocks already
+watched in any bucket (or with retained prediction history) show **View your
+prediction**, opening that stock's saved history in a dialog. Watch-only stocks
+show their bucket membership and an option to record their first prediction.
+Saving a prediction also adds the stock to its selected bucket.
+Watch a stock without making a prediction, or save an up/down expectation with
+an optional percentage target, confidence, future weekday deadline, and reason.
+The reference is a freshly fetched, timestamped Yahoo quote; it may be delayed
+or from the previous session. Quotes older than seven days cannot start predictions.
+Terms are locked after save. Cancelled predictions remain in history; "Make another
+prediction" creates a separate record. Learning notes remain editable.
+
+There is **no signup, Supabase, or server-side journal database**. IndexedDB stores
+the journal only in this browser profile and origin. Clearing site data, changing
+browser/port, private browsing, or losing the device can lose access. Export CSV
+regularly. CSV backups open in Excel and include buckets, memberships, original
+terms, price evidence, results and notes. Import the original Momentum CSV on the
+other device/browser; it merges identical IDs without duplication and rejects
+conflicting versions atomically without overwriting existing records. Workbooks
+(`.xlsx`) and arbitrary spreadsheets are not accepted. Spreadsheet formula cells
+are escaped. Imports are limited to 5 MB and journals to 20,000 records.
+Local history is user-editable and unverified, not tamper-proof.
+
+Predictions use the selected date's **15:30 Asia/Kolkata daily close**, evaluated
+after **18:00 India time**. A target must be achieved at that close, not touched
+earlier. Direction correct / target missed and unchanged are separate outcomes.
+Weekends are rejected; exchange holidays or missing historical bars stay awaiting
+data without substituting another date. Provider-reported splits since the
+reference prevent automatic evaluation because old prices may be adjusted.
+Dividends are not included in price movement.
+
+Opening the watchlist page or a stock journal dialog, or clicking
+**Refresh journal prices & results**, checks watched
+stocks and pending predictions sequentially, one symbol at a time, without a
+full-market scan. Stock dialogs check only their selected symbol.
+`GET /api/journal-market?symbol=TCS&from=<unix-seconds>` provides
+read-only quote/history data; it does not store predictions. Checks only run while
+the page is open, not as background scheduled jobs. Completed evidence is retained.
+The dashboard separates directional accuracy from target achievement and excludes
+pending/cancelled/missing-data records. Watchlists paginate at 100 and prediction
+history at 20. Journal errors are shown explicitly, including blocked browser storage.
 
 The Streamlit prototype still uses its separate starter list in `python/app.py`.

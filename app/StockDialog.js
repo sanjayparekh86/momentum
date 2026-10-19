@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import SignalBadge from "./SignalBadge";
 
-export default function StockDialog({ stock, onClose }) {
+export default function StockDialog({ stock, onClose, onJournal, hasPrediction }) {
   const dialog = useRef(null);
   const [details, setDetails] = useState(null);
   const [error, setError] = useState("");
@@ -50,6 +50,7 @@ export default function StockDialog({ stock, onClose }) {
           <button autoFocus onClick={() => dialog.current.close()} aria-label="Close stock details">Close</button>
         </header>
         <p><SignalBadge signal={info.signal} /> Technical trend signal only, not a buy/sell recommendation or investment advice.</p>
+        {onJournal && <button className="btn btn-primary" onClick={() => onJournal(stock)}>{hasPrediction ? "View your prediction" : "+ Watch / Predict"}</button>}
         <ul className="signal-reasons">{info.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
         {loading && <p role="status" className="meta">Loading latest quote and company news…</p>}
         {error && <p role="alert" className="err">{error} <button onClick={() => setAttempt((n) => n + 1)}>Retry details</button></p>}
