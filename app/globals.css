@@ -86,6 +86,12 @@ textarea { font:inherit; color:var(--ink); background:var(--card); border:1px so
 .screener-modes { margin:22px 0 16px; }
 .stock-search { padding:20px; background:var(--card); border:1px solid var(--line); border-radius:12px; }
 .stock-search .search-label { display:block; max-width:600px; }
+.journal-stock-search { min-width:0; }
+.journal-stock-search .search-label { min-width:0; display:block; }
+.journal-stock-search p { font-size:12px; margin:8px 0 0; }
+.journal-stock-search .stock-search-option { gap:10px; overflow-wrap:anywhere; }
+.journal-stock-search .stock-search-option > span { min-width:0; }
+.journal-stock-search .search-action { flex-shrink:0; }
 .stock-search input { padding:12px; min-height:44px; }
 .stock-search p { font-size:13px; margin:12px 0 0; }
 .stock-search-results { list-style:none; margin:16px 0 0; padding:0; max-height:330px; overflow-y:auto; border:1px solid var(--line); border-radius:8px; }

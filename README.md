@@ -107,7 +107,13 @@ with bucket tabs, a status filter, summary cards and pagination; on small screen
 scroll horizontally to view every column. **Add stock** opens a two-part entry
 form; use **Watch only** to save without a prediction. In prediction history,
 **Details** expands the original reasoning, price evidence, learning notes, and
-repeat/cancel actions. CSV backups are under **Import / Export**.
+repeat/cancel actions. Cancelled predictions have a **Delete** action in the history
+table, with confirmation before permanently removing that prediction and its notes.
+Watchlist entries and other predictions are retained. Pending and completed
+predictions cannot be deleted. CSV backups are under **Import / Export**.
+When adding a stock to a bucket, search by company name or NSE symbol and select
+a matching stock from the suggestions. Editing the search clears the previous
+selection, so an unfinished search cannot accidentally save the wrong stock.
 Each prediction shows the latest available market quote and its timestamp,
 plus rupee/percentage movement since its reference price. Direction/target
 progress is provisional and separate from the locked deadline result.

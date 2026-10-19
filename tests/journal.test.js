@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CSV_FIELDS, JOURNAL_SOURCE, deadlineClose, emptyJournal, evaluatePrediction, exchangeDate,
+import { CSV_FIELDS, JOURNAL_SOURCE, deadlineClose, deleteCancelledPrediction, emptyJournal, evaluatePrediction, exchangeDate,
   exportJournal, hasJournalStock, importJournal, mergeJournals, newPrediction, outcome, parseCSV, predictionProgress, validDeadline, validateJournal } from "../lib/journal.js";
 import { getJournalMarket } from "../lib/yahoo.js";
 import { journalTransaction } from "../lib/journal-storage.js";
@@ -24,6 +24,23 @@ function journal(p = prediction()) {
 const closeTime = Date.parse("2026-10-20T18:00:00+05:30");
 const market = (price) => ({ quote: { price, at: new Date(deadlineClose("2026-10-20")).toISOString() },
   rows: [{ t: Date.parse("2026-10-20T09:15:00+05:30") / 1000, c: price }], splits: [] });
+
+test("deleting only cancelled predictions preserves watchlist, buckets, and other history", () => {
+  const cancelled = { ...prediction(), status: "cancelled", reflection: "Old notes" };
+  const pending = { ...prediction(), id: "pending" };
+  const completed = evaluatePrediction({ ...prediction(), id: "completed" }, market(105), closeTime).prediction;
+  const original = { ...journal(cancelled), predictions: [cancelled, pending, completed] };
+  const deleted = deleteCancelledPrediction(original, cancelled.id);
+  validateJournal(deleted);
+  assert.deepEqual(deleted.predictions, [pending, completed]);
+  assert.equal(deleted.stocks, original.stocks);
+  assert.equal(deleted.buckets, original.buckets);
+  assert.equal(original.predictions.length, 3);
+  assert.throws(() => deleteCancelledPrediction(original, pending.id), /Only cancelled/);
+  assert.throws(() => deleteCancelledPrediction(original, completed.id), /Only cancelled/);
+  assert.throws(() => deleteCancelledPrediction(original, "missing"), /no longer exists/);
+  assert.deepEqual(importJournal(exportJournal(deleted)), deleted);
+});
 
 test("alerts opt in and claim only one check per 30 minutes across tabs", () => {
   const disabled = emptyAlerts();

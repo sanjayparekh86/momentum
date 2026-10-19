@@ -1,12 +1,13 @@
 "use client";
 import { Fragment, useEffect, useRef, useState } from "react";
-import { deadlineClose, evaluatePrediction, exchangeDate, exportJournal, importJournal,
+import { deadlineClose, deleteCancelledPrediction, evaluatePrediction, exchangeDate, exportJournal, importJournal,
   JOURNAL_SOURCE, mergeJournals, newPrediction, predictionProgress } from "@/lib/journal";
 import { journalTransaction } from "@/lib/journal-storage";
 import useJournal from "./useJournal";
 import Link from "next/link";
 import { marketData } from "@/lib/journal-market-client";
 import { PriceAlertControls } from "./PriceAlerts";
+import StockSearch from "./StockSearch";
 
 const money = (n) => Number.isFinite(n) ? `INR ${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}` : "Unavailable";
 const percent = (n) => Number.isFinite(n) ? `${n > 0 ? "+" : ""}${n.toFixed(2)}%` : "-";
@@ -33,6 +34,7 @@ export default function PredictionJournal({ symbol = "", initialView = "history"
   const [messages, setMessages] = useState({});
   const [reflection, setReflection] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
   const [showBucketForm, setShowBucketForm] = useState(false);
   const container = useRef(null);
   const formStart = useRef(null);
@@ -151,6 +153,7 @@ export default function PredictionJournal({ symbol = "", initialView = "history"
     event.preventDefault();
     run(async () => {
       requireBucket();
+      if (!/^[A-Z0-9&_.-]{1,64}$/.test(form.symbol)) throw new Error("Choose a stock from the matching NSE stocks.");
       const market = await marketData(form.symbol);
       if (!market.quote) throw new Error("Provider did not supply a timestamped reference quote.");
       setQuote({ ...market.quote, symbol: form.symbol });
@@ -282,8 +285,16 @@ export default function PredictionJournal({ symbol = "", initialView = "history"
                 {!data.buckets.length && <option value="">Create a bucket first</option>}
                 {data.buckets.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select></label>
-              <label>NSE symbol <input required readOnly={!!symbol} maxLength={64} value={form.symbol} onChange={(e) => updateForm("symbol", e.target.value.trim().toUpperCase())} placeholder="TCS" /></label>
+              {symbol ? <label>NSE symbol <input required readOnly value={form.symbol} /></label>
+                : <StockSearch variant="journal" initialSymbol={form.symbol}
+                  onQueryChange={() => updateForm("symbol", "")} onSelect={(stock) => updateForm("symbol", stock.symbol)} />}
               <div className="full-width watch-only-row"><span className="meta">Save it now. Make a prediction later.</span><button className="btn btn-secondary" type="button" disabled={!activeBucket || !form.symbol} onClick={addStock}>Watch only</button></div>
+              <div className="full-width form-divider">
+                {quote && quote.symbol === form.symbol && <div className="quote-preview"><div><span className="eyebrow">REFERENCE PREVIEW</span><strong>{money(quote.price)}</strong><small>{new Date(quote.at).toLocaleString()}</small></div>
+                  {form.targetPercent !== "" && <div><span className="eyebrow">YOUR TARGET</span><strong>{money(quote.price * (1 + (form.direction === "up" ? 1 : -1) * Number(form.targetPercent) / 100))}</strong></div>}</div>}
+                {quoteError && <p className="err" role="alert">Quote: {quoteError}. Saving retries the quote request.</p>}
+                <p className="form-hint">{JOURNAL_SOURCE}. A fresh quote is captured on save. Prediction terms are then locked; learning notes remain editable.</p>
+              </div>
               <div className="full-width form-divider"><span className="eyebrow">02 / RECORD YOUR EXPECTATION</span><h3>What do you think happens next?</h3><p className="meta">Ready to make a prediction? Add your direction and deadline.</p></div>
               <div className="direction-field"><span id={isDialog ? "dialog-direction" : "page-direction"}>Expected direction</span>
                 <div className="direction-picker" role="group" aria-labelledby={isDialog ? "dialog-direction" : "page-direction"}>
@@ -297,10 +308,7 @@ export default function PredictionJournal({ symbol = "", initialView = "history"
               <label>Optional confidence (0-100%) <input type="number" min="0" max="100" step="any" value={form.confidence} onChange={(e) => updateForm("confidence", e.target.value)} /></label>
               <label className="full-width">Your reasoning <span className="optional">(optional)</span><textarea maxLength={4000} value={form.reason} onChange={(e) => updateForm("reason", e.target.value)} placeholder="What did you notice? Write a note for your future self." /></label>
               <div className="full-width">
-                {quote && quote.symbol === form.symbol && <div className="quote-preview"><div><span className="eyebrow">REFERENCE PREVIEW</span><strong>{money(quote.price)}</strong><small>{new Date(quote.at).toLocaleString()}</small></div>
-                  {form.targetPercent !== "" && <div><span className="eyebrow">YOUR TARGET</span><strong>{money(quote.price * (1 + (form.direction === "up" ? 1 : -1) * Number(form.targetPercent) / 100))}</strong></div>}</div>}
-                {quoteError && <p className="err" role="alert">Quote: {quoteError}. Saving retries the quote request.</p>}
-                <p className="form-hint">{JOURNAL_SOURCE}. A fresh quote is captured on save. Prediction terms are then locked; learning notes remain editable.</p>
+                
                 <div className="form-footer"><button className="btn btn-ghost" type="button" onClick={() => setView("history")}>Back to overview</button>
                   <button className="btn btn-primary" type="submit" disabled={!activeBucket || !form.symbol}>{busy ? "Saving..." : "Save prediction"}</button>
                 </div>
@@ -386,7 +394,21 @@ export default function PredictionJournal({ symbol = "", initialView = "history"
               <td><span className={`result-pill ${tone}`}>{result === "pending" ? "Pending" : result === "cancelled" ? "Cancelled" : result}</span>
                 {p.evaluation && <><small className="cell-subtext">Close: {money(p.evaluation.price)}</small><small className="cell-subtext">{percent(p.evaluation.movement)} at deadline</small></>}</td>
               <td><button className="btn btn-ghost btn-small" aria-label={`${expanded ? "Hide" : "View"} ${p.symbol} prediction details`} aria-expanded={expanded}
-                aria-controls={detailId} onClick={() => { setExpandedId(expanded ? null : p.id); setReflection(null); }}>{expanded ? "Hide" : "Details"}</button></td>
+                aria-controls={detailId} onClick={() => { setExpandedId(expanded ? null : p.id); setReflection(null); }}>{expanded ? "Hide" : "Details"}</button>
+                {p.status === "cancelled" && (deletingId === p.id ? <div>
+                  <p>Permanently delete this prediction and its notes? This cannot be undone. The watchlist entry stays.</p>
+                  <div className="row-actions">
+                    <button className="btn btn-danger btn-small" disabled={busy} aria-label={`Confirm deletion of ${p.symbol} prediction`} onClick={() => run(async () => {
+                      await persist((state) => deleteCancelledPrediction(state, p.id));
+                      setDeletingId(null);
+                      if (expandedId === p.id) setExpandedId(null);
+                      if (reflection?.id === p.id) setReflection(null);
+                      setNotice(`${p.symbol} cancelled prediction deleted. Watchlist and other predictions were retained.`);
+                    })}>Confirm delete</button>
+                    <button className="btn btn-ghost btn-small" disabled={busy} onClick={() => setDeletingId(null)}>Keep prediction</button>
+                  </div>
+                </div> : <button className="btn btn-danger btn-small" disabled={busy}
+                  aria-label={`Delete ${p.symbol} cancelled prediction`} onClick={() => setDeletingId(p.id)}>Delete</button>)}</td>
             </tr>
             <tr className="prediction-detail-row" hidden={!expanded} id={detailId}><td colSpan={8}>
               <div className="prediction-detail">
