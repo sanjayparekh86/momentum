@@ -8,6 +8,7 @@ import PredictionJournal from "./PredictionJournal";
 import Link from "next/link";
 import useJournal from "./useJournal";
 import { hasJournalStock } from "@/lib/journal";
+import StockSearch from "./StockSearch";
 
 const REFRESH_MS = 300000;
 const PAGE_SIZE = 100;
@@ -15,6 +16,7 @@ const PROGRESS_MS = 5000;
 
 export default function Home() {
   const [data, setData] = useState(null);
+  const [mode, setMode] = useState("movers");
   const [threshold, setThreshold] = useState(5);
   const [thresholdText, setThresholdText] = useState("5");
   const [direction, setDirection] = useState("both");
@@ -41,7 +43,7 @@ export default function Home() {
     const id = ++reqId.current;
     inFlight.current = true;
     setLoading(true); setError("");
-    const params = `threshold=${threshold}&direction=${direction}&range=${range}`;
+    const params = `threshold=${threshold}&direction=${direction}&range=${range}${scanOptions.symbol ? `&symbols=${encodeURIComponent(scanOptions.symbol)}` : ""}`;
     let finished = false, timer;
     const poll = async () => {
       try {
@@ -61,12 +63,15 @@ export default function Home() {
       }
       if (!finished && !controller.signal.aborted) timer = setTimeout(poll, PROGRESS_MS);
     };
-    if (range !== "all") timer = setTimeout(poll, PROGRESS_MS);
+    if (range !== "all" && !scanOptions.symbol) timer = setTimeout(poll, PROGRESS_MS);
     try {
       const r = await fetch(`/api/screener?${params}&save=1`, { signal: controller.signal });
       const json = await r.json();
       if (!r.ok) throw new Error(json.error || `Request failed (${r.status})`);
-      if (id === reqId.current) { setData(json); setError(""); }
+      if (id === reqId.current) {
+        if (scanOptions.symbol) json.movers = json.movers.map((stock) => ({ ...stock, name: scanOptions.name }));
+        setData(json); setError("");
+      }
     } catch (e) { if (!controller.signal.aborted && id === reqId.current) setError(e.message); }
     finally { finished = true; clearTimeout(timer); }
     if (id === reqId.current) { inFlight.current = false; setLoading(false); }
@@ -74,16 +79,23 @@ export default function Home() {
 
   // Only refresh while visible; local search and sorting never start a scan.
   useEffect(() => {
+    if ((mode === "stock") !== !!scanOptions.symbol) return;
     load();
     const tick = () => { if (document.visibilityState === "visible" && !inFlight.current) load(); };
     const t = setInterval(tick, REFRESH_MS);
     document.addEventListener("visibilitychange", tick);
     return () => { clearInterval(t); document.removeEventListener("visibilitychange", tick); request.current?.abort(); };
-  }, [load]);
+  }, [load, mode, scanOptions.symbol]);
 
   useEffect(() => { setPage(1); }, [scanOptions, query, sort, reverse]);
 
-  const optionsChanged = threshold !== scanOptions.threshold || direction !== scanOptions.direction || range !== scanOptions.range;
+  const optionsChanged = mode === "movers" && (threshold !== scanOptions.threshold || direction !== scanOptions.direction || range !== scanOptions.range);
+  const changeMode = (next) => {
+    if (next === mode) return;
+    request.current?.abort(); ++reqId.current; inFlight.current = false;
+    setLoading(false); setError(""); setData(null); setQuery(""); setMode(next);
+    if (next === "movers") setScanOptions({ threshold, direction, range });
+  };
   const manualScan = () => {
     if (optionsChanged) setScanOptions({ threshold, direction, range });
     else load();
@@ -118,9 +130,19 @@ export default function Home() {
     <main>
     <p className="meta screener-notice">Technical signals only, not investment advice. Check news and results for why a stock moved.</p>
       <header>
-        <h1>Movers over {data?.threshold ?? scanOptions.threshold}% {RANGES[data?.range || scanOptions.range].title}</h1>
+        <h1>{mode === "stock" ? "Search by stock" : <>Movers over {data?.threshold ?? scanOptions.threshold}% {RANGES[data?.range || scanOptions.range].title}</>}</h1>
+        <Link className="button-link" href="/watchlist">My watchlist</Link>
+      </header>
+      <div className="screener-modes journal-tabs" aria-label="Screener mode">
+        <button aria-pressed={mode === "movers"} onClick={() => changeMode("movers")}>Find movers</button>
+        <button aria-pressed={mode === "stock"} onClick={() => changeMode("stock")}>Search stock</button>
+      </div>
+      {mode === "stock" ? <StockSearch onSelect={(stock) => {
+        request.current?.abort(); ++reqId.current;
+        setQuery(""); setData(null); setError("");
+        setScanOptions({ threshold: 0, direction: "both", range: "1d", symbol: stock.symbol, name: stock.name });
+      }} /> : (
         <div className="controls">
-          <Link className="button-link" href="/watchlist">My watchlist</Link>
           <label>Move ≥
             <input type="text" inputMode="decimal" enterKeyHint="done" autoComplete="off" value={thresholdText}
                    aria-label="Minimum move percentage"
@@ -142,20 +164,20 @@ export default function Home() {
           </select>
           <button className="btn btn-primary" onClick={manualScan} disabled={loading}>{loading ? "Scanning…" : "Rescan"}</button>
         </div>
-      </header>
+      )}
       {optionsChanged && <p className="meta" role="status">Options changed. Click Rescan to apply them; existing results still use the previous scan settings.</p>}
       {journalError && <p className="err" role="alert">{journalError} Journal membership could not be loaded.</p>}
 
-      {error && <p className="err">{error}. Check your connection and rescan.</p>}
-      {loading && <p className="meta" role="status">Scanning all NSE equities. Results appear as batches finish; existing results stay usable.
+      {error && <p className="err" role="alert">{error}. Check your connection and {mode === "stock" ? "choose the stock again to retry" : "rescan"}.</p>}
+      {loading && <p className="meta" role="status">{mode === "stock" ? `Analyzing ${scanOptions.symbol}. Only this stock is requested.` : "Scanning all NSE equities. Results appear as batches finish; existing results stay usable."}
         {scanOptions.range === "all" && " All-time results appear once historical enrichment is complete."}</p>}
       {data && <p className="meta">{data.count} matches from {data.available} analyzed / {data.scanned} listed stocks
         {data.insufficient > 0 && ` (${data.insufficient} with insufficient data)`}.
         {data.partial ? ` Scan in progress: ${data.processed} / ${data.scanned} checked. Results are incomplete.`
           : ` Scan completed ${new Date(data.updatedAt).toLocaleTimeString()}.`}
-        {" "}Page refreshes every {REFRESH_MS / 60000} minutes while visible; full-market scans are cached for 5 minutes. Set Move to 0% with Up and down to show every listed stock.</p>}
+        {" "}{mode === "stock" ? "No movement filter is applied. Prices may be delayed." : `Page refreshes every ${REFRESH_MS / 60000} minutes while visible; full-market scans are cached for 5 minutes. Set Move to 0% with Up and down to show every listed stock.`}</p>}
       <div className="table-tools">
-        <label className="search-label">Search stocks
+        <label className="search-label">Filter displayed results
           <input type="search" placeholder="Symbol, e.g. TCS or M&M" value={query} onChange={(e) => setQuery(e.target.value)} />
         </label>
         <label>Sort by <select value={sort} onChange={(e) => setSort(e.target.value)}>
@@ -164,7 +186,7 @@ export default function Home() {
         <label className="reverse-sort"><input type="checkbox" checked={reverse} onChange={(e) => setReverse(e.target.checked)} /> Reverse order</label>
         {data && <span className="meta" role="status">{movers.length} of {data.count} matches shown</span>}
       </div>
-      {data?.count === 0 && !data.partial && <p>No stock has moved {data.threshold}% or more {RANGES[data.range || range].title}. Lower the threshold to see more.</p>}
+      {mode === "movers" && data?.count === 0 && !data.partial && <p>No stock has moved {data.threshold}% or more {RANGES[data.range || range].title}. Lower the threshold to see more.</p>}
       {data && movers.length === 0 && query.trim() && <p>No matching stock in the current results. Clear the search or lower the minimum move to 0% to search more stocks.</p>}
 
       {movers.length > 0 && (
@@ -176,7 +198,7 @@ export default function Home() {
             {sortHeader("signal", "Signal")}<th>Why</th><th>Journal</th></tr></thead>
           <tbody>{rows.map((m) => (
             <tr key={m.symbol} className={m.insufficient ? "insufficient" : undefined}>
-              <td data-label="Stock" className="stock-cell"><button className="stock-link" onClick={() => setSelected(m)} aria-label={`View ${m.symbol} details`}>{m.symbol}</button></td>
+              <td data-label="Stock" className="stock-cell"><button className="stock-link" onClick={() => setSelected(m)} aria-label={`View ${m.symbol} details`}>{m.symbol}</button>{m.name && <small className="cell-subtext">{m.name}</small>}</td>
               <td data-label="Price">{Number.isFinite(m.price) ? `₹${m.price.toLocaleString("en-IN")}` : "-"}</td>
               {!isToday && <td data-label={RANGES[data.range].label} className={trend(m.rangeChange)}>{fmt(m.rangeChange)}</td>}
               <td data-label={isToday ? "Change" : "Today"} className={trend(m.change)}>{fmt(m.change)}</td>

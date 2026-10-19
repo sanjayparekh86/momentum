@@ -63,6 +63,16 @@ memory; stop the development server before building.
 
 ## Search, sorting, and stock details
 
+The screener has two modes: **Find movers** keeps the percentage/range scan;
+**Search stock** looks up company names or NSE trading symbols in the cached
+official NSE equity list. Choose **Analyze stock** from the matching results
+to request only that symbol, with no movement filter or full-market scan.
+`GET /api/stocks?q=Tata` returns up to 20 matches, prioritizing exact symbols.
+Switching modes cancels the browser's previous request (an already-running
+shared server scan may continue). Stock lookup uses the same daily NSE list
+cache as market scans. The result-table search only filters displayed results.
+Stock IDs here mean NSE trading symbols, not BSE numeric codes or ISINs.
+
 Search matches stock symbols in the current screener results (set Move to 0%
 with "Up and down" to search every listed stock). Sorting supports absolute
 movement, gains, declines, symbol, price, RSI, relative volume, technical score,

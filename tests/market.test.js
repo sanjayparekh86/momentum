@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { getUniverse, parseSymbols } from "../lib/symbols.js";
+import { getUniverse, parseSymbols, parseEquities, searchEquities } from "../lib/symbols.js";
 import { getDaily, getNews } from "../lib/yahoo.js";
 import { scanStocks, withAllTime, getScanProgress, SCAN_TTL_MS, SCAN_CONCURRENCY } from "../lib/screener.js";
 import { getStockDetails } from "../lib/stock.js";
@@ -23,6 +23,19 @@ test("NSE parsing includes all rows, quoted names, special symbols, and deduplic
   assert.throws(() => parseSymbols("<html>Access denied</html>"), /invalid equity list/);
   assert.throws(() => parseSymbols("SYMBOL,NAME\n,Empty"), /invalid symbols/);
   assert.throws(() => parseSymbols("SYMBOL,NAME\n"), /invalid symbols/);
+});
+
+test("stock search resolves company names and symbols, ranking exact symbols first", () => {
+  const equities = parseEquities('\uFEFFSYMBOL,NAME OF COMPANY,SERIES\r\nTCS,Tata Consultancy Services,EQ\r\nM&M,"Mahindra, Limited",EQ\r\nTATA,Tata Company,EQ\r\nTCS,Duplicate,EQ\r\n');
+  assert.equal(equities.length, 3);
+  assert.equal(equities[1].name, "Mahindra, Limited");
+  assert.deepEqual(searchEquities(equities, " consultancy "), [equities[0]]);
+  assert.equal(searchEquities(equities, "m&m")[0].symbol, "M&M");
+  assert.equal(searchEquities(equities, "tata")[0].symbol, "TATA");
+  assert.deepEqual(searchEquities(equities, "missing"), []);
+  assert.deepEqual(searchEquities(equities, "  "), []);
+  assert.equal(searchEquities(Array.from({ length: 30 }, (_, i) => ({ symbol: `ABC${i}`, name: "ABC company" })), "abc").length, 20);
+  assert.throws(() => parseEquities("SYMBOL,NAME\nTCS,"), /missing company name/);
 });
 
 test("search and sorting are case insensitive, deterministic, and do not mutate results", () => {
